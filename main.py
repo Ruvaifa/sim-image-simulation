@@ -71,6 +71,37 @@ def illumination_pattern(N, freq_cycles=8, angle_deg=0.0, phase=0.0):
     pattern = 0.5 * (1.0 + np.cos(arg))   # range [0,1]
     return pattern
 
+def show_fft(img, ax, title="FFT"):
+    f = np.fft.fftshift(np.fft.fft2(img))
+    mag = np.log1p(np.abs(f))  # log for visibility
+    ax.imshow(mag, cmap='inferno')
+    ax.set_title(title)
+    ax.axis('off')
+
+def separate_components(img, cutoff=0.08, band_radius=0.015, band_shift=0.12):
+    N, M = img.shape
+    f = np.fft.fftshift(np.fft.fft2(img))
+    
+    # frequency grid
+    u = np.linspace(-0.5, 0.5, N, endpoint=False)
+    U, V = np.meshgrid(u, u)
+    R = np.sqrt(U**2 + V**2)
+
+    # --- Low-frequency mask (center) ---
+    low_mask = R < cutoff
+
+    # --- High-frequency mask (sidebands) ---
+    # Example: assume grating along x → sidebands shifted along U axis
+    high_mask = ((np.sqrt((U- band_shift)**2 + V**2) < band_radius) |
+                 (np.sqrt((U+ band_shift)**2 + V**2) < band_radius))
+
+    # Apply masks
+    f_low = f * low_mask
+    f_high = f * high_mask
+
+    low_comp = np.abs(np.fft.ifft2(np.fft.ifftshift(f_low)))
+    high_comp = np.abs(np.fft.ifft2(np.fft.ifftshift(f_high)))
+    return low_comp, high_comp
 
 if __name__ == "__main__":
     N = 512
@@ -111,5 +142,29 @@ if __name__ == "__main__":
         axes[1,i+1].set_title(f"SIM raw (phase {i})")
         axes[1,i+1].axis('off')
 
+
+    # ---------- Fourier Transforms ----------
+    fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 6))
+    
+    # GT and low-pass
+    show_fft(gt, axes[0,0], "GT Fourier")
+    show_fft(lp, axes[1,0], "Low-pass Fourier")
+    
+    # Each SIM image
+    for i in range(len(phases)):
+        show_fft(sim_images[i], axes[0,i+1], f"SIM raw {i} FFT")
+        axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
+        axes[1,i+1].set_title(f"SIM raw {i} (image)")
+        axes[1,i+1].axis('off')
     plt.tight_layout()
+
+    low, high = separate_components(sim_images[0])
+    plt.figure(figsize=(10,4))
+    plt.subplot(1,2,1); plt.imshow(low, cmap='gray'); plt.title("Low-frequency part")
+    plt.subplot(1,2,2); plt.imshow(high, cmap='gray'); plt.title("High-frequency part")
+
+
     plt.show()
+
+    
+
