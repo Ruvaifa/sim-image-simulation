@@ -236,6 +236,15 @@ def reconstruct_from_orientation(sim_imgs_phases, phases, angle_deg, band_shift_
     recon_real /= (recon_real.max() + 1e-12)
     return recon_real, F_combined
 
+
+# ---------- Noise models ----------
+def add_gaussian_noise(img, sigma=0.5):
+    noisy = img + np.random.normal(0, sigma, img.shape)
+    return np.clip(noisy, 0, 1)
+
+def add_poisson_noise(img, scale=50):
+    vals = np.random.poisson(img * scale) / float(scale)
+    return np.clip(vals, 0, 1)
 # if __name__ == "__main__":
 #     N = 512
 #     gt = generate_ground_truth(N)
@@ -390,6 +399,75 @@ if __name__ == "__main__":
 
     axs[1,1].imshow(np.concatenate(per_angle_recons, axis=1), cmap='gray', vmin=0, vmax=1)
     axs[1,1].set_title("Per-Orientation Reconstructions"); axs[1,1].axis("off")
+
+    plt.tight_layout()
+
+    # ---------- NOISY Fourier Transforms ----------
+    # for angle in angles:
+    #     sim_images_noisy = []
+    #     patterns = []
+    #     for p in phases:
+    #         pat = illumination_pattern(N, freq_cycles=freq, angle_deg=angle, phase=p)
+    #         patterns.append(pat)
+    #         sim_raw = lp * pat
+    #         # --- Add noise here ---
+    #         sim_raw = add_gaussian_noise(sim_raw, sigma=0.05)
+    #         # sim_raw = add_poisson_noise(sim_raw, scale=255)
+    #         sim_images_noisy.append(sim_raw)
+
+    #     # Display noisy Fourier transforms
+    #     fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 6))
+    #     fig.suptitle(f"Fourier domain with Noise (orientation {angle}°)", fontsize=14)
+
+    #     show_fft(gt, axes[0,0], "GT Fourier")
+    #     show_fft(lp, axes[1,0], "Low-pass Fourier")
+
+    #     for i in range(len(phases)):
+    #         show_fft(sim_images_noisy[i], axes[0,i+1], f"Noisy SIM raw {i} FFT")
+    #         axes[1,i+1].imshow(sim_images_noisy[i], cmap='gray', vmin=0, vmax=1)
+    #         axes[1,i+1].set_title(f"Noisy SIM raw {i} (image)")
+    #         axes[1,i+1].axis('off')
+
+    #     plt.tight_layout()
+    # ---------- NOISY Reconstruction ----------
+    band_shift_norm = 0.12   # same as before
+    recon_sum_noisy = np.zeros_like(lp)
+    per_angle_recons_noisy = []
+
+    for angle in angles:
+        sim_images_noisy = []
+        for p in phases:
+            pat = illumination_pattern(N, freq_cycles=freq, angle_deg=angle, phase=p)
+            sim_raw = lp * pat
+            # --- Add noise here ---
+            sim_raw = add_gaussian_noise(sim_raw, sigma=0.4)
+            #sim_raw = add_poisson_noise(sim_raw, scale=255)
+            sim_images_noisy.append(sim_raw)
+
+        # Reconstruct for this orientation (using noisy data)
+        recon_img_noisy, _ = reconstruct_from_orientation(sim_images_noisy, phases, angle,
+                                                          band_shift_norm, N, noise_var=1e-3)
+        per_angle_recons_noisy.append(recon_img_noisy)
+        recon_sum_noisy += recon_img_noisy
+
+    # Average across orientations for isotropy
+    recon_iso_noisy = recon_sum_noisy / len(angles)
+
+    # ---------- Display NOISY Reconstructions ----------
+    fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+    fig.suptitle("SIM Reconstruction with Noise", fontsize=14)
+
+    axs[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
+    axs[0,0].set_title("Ground Truth"); axs[0,0].axis("off")
+
+    axs[0,1].imshow(lp, cmap='gray', vmin=0, vmax=1)
+    axs[0,1].set_title("Low-pass (Widefield)"); axs[0,1].axis("off")
+
+    axs[1,0].imshow(recon_iso_noisy, cmap='gray', vmin=0, vmax=1)
+    axs[1,0].set_title("Isotropic SIM Reconstruction (Noisy)"); axs[1,0].axis("off")
+
+    axs[1,1].imshow(np.concatenate(per_angle_recons_noisy, axis=1), cmap='gray', vmin=0, vmax=1)
+    axs[1,1].set_title("Per-Orientation Reconstructions (Noisy)"); axs[1,1].axis("off")
 
     plt.tight_layout()
     plt.show()
