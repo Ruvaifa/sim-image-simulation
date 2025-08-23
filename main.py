@@ -103,68 +103,293 @@ def separate_components(img, cutoff=0.08, band_radius=0.015, band_shift=0.12):
     high_comp = np.abs(np.fft.ifft2(np.fft.ifftshift(f_high)))
     return low_comp, high_comp
 
+def demodulate_three_phase_F(F_imgs, phases):
+    """
+    Vectorized demodulation of three-phase SIM images in Fourier domain.
+    Inputs:
+      F_imgs : array shape (3, N, N) - FFTshifted Fourier transforms of the 3 phase images
+      phases : list/array length 3 - phases in radians (phi0, phi1, phi2)
+    Returns:
+      F0, Fp, Fm : arrays (N, N) - the 0th, +1 and -1 Fourier components (still centered / fftshifted)
+    """
+    # Build mixing matrix M where:
+    # I_p(u) = F0(u) + Fp(u) * e^{i phi_p} + Fm(u) * e^{-i phi_p}
+    # rows = p (phases), cols = [1, e^{i phi}, e^{-i phi}]
+    ph = np.array(phases)
+    M = np.vstack([np.ones_like(ph), np.exp(1j*ph), np.exp(-1j*ph)]).T  # shape (3,3)
+    Minv = np.linalg.pinv(M)  # shape (3,3) - pseudo-inverse (constant across frequencies)
+
+    # reshape F_imgs to (3, N*N) to do linear algebra in one matrix multiplication
+    s0, s1, s2 = F_imgs.shape
+    assert s0 == 3
+    N = s1
+    Fstack = F_imgs.reshape(3, -1)  # (3, N*N)
+    comps = Minv @ Fstack            # (3, N*N)
+    F0 = comps[0].reshape(N, N)
+    Fp = comps[1].reshape(N, N)
+    Fm = comps[2].reshape(N, N)
+    return F0, Fp, Fm
+
+
+def shift_spectrum(F, shift_pix):
+    """
+    Shift a 2D fftshifted spectrum by integer pixels using np.roll.
+    shift_pix: tuple (shift_y, shift_x) in pixels (positive means roll downward / right).
+    We assume input is fftshifted; roll acts on array indices.
+    """
+    sy, sx = int(round(shift_pix[0])), int(round(shift_pix[1]))
+    return np.roll(np.roll(F, sy, axis=0), sx, axis=1)
+
+
+# def reconstruct_from_orientation(sim_imgs_phases, phases, angle_deg, band_shift_norm, N, w0=1.0, eps=1e-9):
+#     """
+#     Reconstruct image from three-phase SIM images of one grating orientation.
+#     sim_imgs_phases: list/array of 3 real-space images (N,N) for the 3 phases
+#     phases: list of 3 phases in radians
+#     angle_deg: orientation of grating (degrees)
+#     band_shift_norm: sideband shift in normalized freq units (like your band_shift param, 0..0.5)
+#     Returns:
+#       recon_image (real), and also the combined Fourier spectrum (fftshifted) for inspection.
+#     """
+#     # compute FFTs (fftshifted)
+#     F_imgs = np.stack([np.fft.fftshift(np.fft.fft2(im)) for im in sim_imgs_phases], axis=0)  # (3,N,N)
+
+#     # demodulate -> obtain F0(u), F+1(u), F-1(u) (still centered)
+#     F0, Fp, Fm = demodulate_three_phase_F(F_imgs, phases)  # complex arrays
+
+#     # compute pixel shifts to move sidebands to center
+#     # band_shift_norm is fraction of Nyquist (u coords in [-0.5,0.5) so multiply by N)
+#     theta = np.deg2rad(angle_deg)
+#     # pixel offset in frequency plane (cols = x, rows = y)
+#     # U axis (x / cols) corresponds to horizontal freq index, V axis (y / rows) to vertical
+#     kx = band_shift_norm * np.cos(theta) * N   # pixels in x direction
+#     ky = band_shift_norm * np.sin(theta) * N   # pixels in y direction
+
+#     # To shift the +1 sideband to center we need to roll by (-ky, -kx)
+#     shift_plus = (-ky, -kx)
+#     shift_minus = ( ky,  kx)  # -1 sideband will be shifted by opposite amount
+
+#     Fp_shifted = shift_spectrum(Fp, shift_plus)
+#     Fm_shifted = shift_spectrum(Fm, shift_minus)
+
+#     # Combine spectra: simple sum, with small Wiener-like stabilization on denominator if needed
+#     # Optionally apply a weighting to avoid noise amplification; here we use equal weights.
+#     F_combined = F0 + w0 * Fp_shifted + w0 * Fm_shifted
+
+#     # Inverse transform to get reconstructed image
+#     recon = np.fft.ifft2(np.fft.ifftshift(F_combined))
+#     recon_real = np.real(recon)
+#     # normalize for display
+#     recon_real -= recon_real.min()
+#     recon_real /= (recon_real.max() + 1e-12)
+#     return recon_real, F_combined
+def shift_spectrum_subpixel(F, shift_pix):
+    """
+    Subpixel shift of a 2D fftshifted spectrum using phase ramps.
+    shift_pix: (shift_y, shift_x) in pixels
+    """
+    N, M = F.shape
+    u = np.fft.fftfreq(N) * N   # frequency indices [-N/2..N/2-1] after fftshift
+    U, V = np.meshgrid(u, u)
+    dy, dx = shift_pix
+    # Phase ramp for shifting
+    ramp = np.exp(-2j * np.pi * (U*dx/N + V*dy/N))
+    return F * ramp
+
+
+def reconstruct_from_orientation(sim_imgs_phases, phases, angle_deg, band_shift_norm, N, noise_var=1e-6):
+    """
+    Reconstruct image from three-phase SIM images of one grating orientation.
+    Includes Wiener-like regularization.
+    """
+    # compute FFTs (fftshifted)
+    F_imgs = np.stack([np.fft.fftshift(np.fft.fft2(im)) for im in sim_imgs_phases], axis=0)  # (3,N,N)
+
+    # demodulate -> obtain F0(u), F+1(u), F-1(u) (still centered)
+    F0, Fp, Fm = demodulate_three_phase_F(F_imgs, phases)  # complex arrays
+
+    # compute pixel shifts to move sidebands to center
+    theta = np.deg2rad(angle_deg)
+    kx = band_shift_norm * np.cos(theta) * N
+    ky = band_shift_norm * np.sin(theta) * N
+
+    # Fp_shifted = shift_spectrum(Fp, (-ky, -kx))
+    # Fm_shifted = shift_spectrum(Fm, ( ky,  kx))
+    Fp_shifted = shift_spectrum_subpixel(Fp, (-ky, -kx))
+    Fm_shifted = shift_spectrum_subpixel(Fm, ( ky,  kx))
+    # --- Wiener-like weighting ---
+    P0 = np.abs(F0)**2
+    Pp = np.abs(Fp_shifted)**2
+    Pm = np.abs(Fm_shifted)**2
+
+    w0 = P0 / (P0 + noise_var)
+    wp = Pp / (Pp + noise_var)
+    wm = Pm / (Pm + noise_var)
+
+    # Combine spectra using weights
+    F_combined = w0 * F0 + wp * Fp_shifted + wm * Fm_shifted
+
+    # Inverse transform to get reconstructed image
+    recon = np.fft.ifft2(np.fft.ifftshift(F_combined))
+    recon_real = np.real(recon)
+    recon_real -= recon_real.min()
+    recon_real /= (recon_real.max() + 1e-12)
+    return recon_real, F_combined
+
+# if __name__ == "__main__":
+#     N = 512
+#     gt = generate_ground_truth(N)
+#     # low-pass the GT once (the "widefield" baseline)
+#     lp = low_pass_filter(gt, cutoff=0.15)
+
+#     # choose grating parameters
+#     freq = 12            # cycles across the whole image (adjust by eye)
+#     angle = 0.0          # degrees (0 = stripes along x)
+#     phases = [0, 2*np.pi/3, 4*np.pi/3]   # three-phase SIM
+
+#     sim_images = []
+#     patterns = []
+#     for p in phases:
+#         pat = illumination_pattern(N, freq_cycles=freq, angle_deg=angle, phase=p)
+#         patterns.append(pat)
+#         sim_raw = lp * pat           # multiply low-passed GT with grating
+#         sim_images.append(sim_raw)
+
+#     # display
+#     fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 5))
+
+#     axes[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
+#     axes[0,0].set_title("Ground Truth")
+#     axes[0,0].axis('off')
+
+#     axes[1,0].imshow(lp, cmap='gray', vmin=0, vmax=1)
+#     axes[1,0].set_title("Low-pass (widefield)")
+#     axes[1,0].axis('off')
+
+#     for i in range(len(phases)):
+#         axes[0,i+1].imshow(patterns[i], cmap='gray', vmin=0, vmax=1)
+#         axes[0,i+1].set_title(f"Pattern (phase {i})")
+#         axes[0,i+1].axis('off')
+
+#         axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
+#         axes[1,i+1].set_title(f"SIM raw (phase {i})")
+#         axes[1,i+1].axis('off')
+
+
+#     # ---------- Fourier Transforms ----------
+#     fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 6))
+    
+#     # GT and low-pass
+#     show_fft(gt, axes[0,0], "GT Fourier")
+#     show_fft(lp, axes[1,0], "Low-pass Fourier")
+    
+#     # Each SIM image
+#     for i in range(len(phases)):
+#         show_fft(sim_images[i], axes[0,i+1], f"SIM raw {i} FFT")
+#         axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
+#         axes[1,i+1].set_title(f"SIM raw {i} (image)")
+#         axes[1,i+1].axis('off')
+#     plt.tight_layout()
+
+#     low, high = separate_components(sim_images[0])
+#     plt.figure(figsize=(10,4))
+#     plt.subplot(1,2,1); plt.imshow(low, cmap='gray'); plt.title("Low-frequency part")
+#     plt.subplot(1,2,2); plt.imshow(high, cmap='gray'); plt.title("High-frequency part")
+
+
+#     plt.show()
 if __name__ == "__main__":
     N = 512
     gt = generate_ground_truth(N)
-    # low-pass the GT once (the "widefield" baseline)
     lp = low_pass_filter(gt, cutoff=0.15)
 
-    # choose grating parameters
-    freq = 12            # cycles across the whole image (adjust by eye)
-    angle = 0.0          # degrees (0 = stripes along x)
-    phases = [0, 2*np.pi/3, 4*np.pi/3]   # three-phase SIM
+    freq = 12
+    phases = [0, 2*np.pi/3, 4*np.pi/3]
+    angles = [0, 60, 120]   # multiple orientations
 
-    sim_images = []
-    patterns = []
-    for p in phases:
-        pat = illumination_pattern(N, freq_cycles=freq, angle_deg=angle, phase=p)
-        patterns.append(pat)
-        sim_raw = lp * pat           # multiply low-passed GT with grating
-        sim_images.append(sim_raw)
+    for angle in angles:
+        sim_images = []
+        patterns = []
+        for p in phases:
+            pat = illumination_pattern(N, freq_cycles=freq, angle_deg=angle, phase=p)
+            patterns.append(pat)
+            sim_raw = lp * pat
+            sim_images.append(sim_raw)
 
-    # display
-    fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 5))
+        # ---------- Display patterns and SIM raw images ----------
+        fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 5))
+        fig.suptitle(f"Orientation {angle}°", fontsize=14)
 
-    axes[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
-    axes[0,0].set_title("Ground Truth")
-    axes[0,0].axis('off')
+        axes[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
+        axes[0,0].set_title("Ground Truth"); axes[0,0].axis('off')
 
-    axes[1,0].imshow(lp, cmap='gray', vmin=0, vmax=1)
-    axes[1,0].set_title("Low-pass (widefield)")
-    axes[1,0].axis('off')
+        axes[1,0].imshow(lp, cmap='gray', vmin=0, vmax=1)
+        axes[1,0].set_title("Low-pass (widefield)"); axes[1,0].axis('off')
 
-    for i in range(len(phases)):
-        axes[0,i+1].imshow(patterns[i], cmap='gray', vmin=0, vmax=1)
-        axes[0,i+1].set_title(f"Pattern (phase {i})")
-        axes[0,i+1].axis('off')
+        for i in range(len(phases)):
+            axes[0,i+1].imshow(patterns[i], cmap='gray', vmin=0, vmax=1)
+            axes[0,i+1].set_title(f"Pattern phase {i}"); axes[0,i+1].axis('off')
 
-        axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
-        axes[1,i+1].set_title(f"SIM raw (phase {i})")
-        axes[1,i+1].axis('off')
+            axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
+            axes[1,i+1].set_title(f"SIM raw phase {i}"); axes[1,i+1].axis('off')
 
+        plt.tight_layout()
 
-    # ---------- Fourier Transforms ----------
-    fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 6))
-    
-    # GT and low-pass
-    show_fft(gt, axes[0,0], "GT Fourier")
-    show_fft(lp, axes[1,0], "Low-pass Fourier")
-    
-    # Each SIM image
-    for i in range(len(phases)):
-        show_fft(sim_images[i], axes[0,i+1], f"SIM raw {i} FFT")
-        axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
-        axes[1,i+1].set_title(f"SIM raw {i} (image)")
-        axes[1,i+1].axis('off')
+        # ---------- Fourier Transforms ----------
+        fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 6))
+        fig.suptitle(f"Fourier domain (orientation {angle}°)", fontsize=14)
+
+        show_fft(gt, axes[0,0], "GT Fourier")
+        show_fft(lp, axes[1,0], "Low-pass Fourier")
+
+        for i in range(len(phases)):
+            show_fft(sim_images[i], axes[0,i+1], f"SIM raw {i} FFT")
+            axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
+            axes[1,i+1].set_title(f"SIM raw {i} (image)")
+            axes[1,i+1].axis('off')
+
+        plt.tight_layout()
+
+        # ---------- Low & High frequency split for one phase ----------
+        low, high = separate_components(sim_images[0])
+        plt.figure(figsize=(10,4))
+        plt.suptitle(f"Frequency components (orientation {angle}°)", fontsize=14)
+        plt.subplot(1,2,1); plt.imshow(low, cmap='gray'); plt.title("Low-frequency part")
+        plt.subplot(1,2,2); plt.imshow(high, cmap='gray'); plt.title("High-frequency part")
+    # ---------- Reconstruction across orientations ----------
+    band_shift_norm = 0.12   # matches your separation setting
+    recon_sum = np.zeros_like(lp)
+    per_angle_recons = []
+
+    for angle in angles:
+        sim_images = []
+        for p in phases:
+            pat = illumination_pattern(N, freq_cycles=freq, angle_deg=angle, phase=p)
+            sim_images.append(lp * pat)
+
+        # Reconstruct for this orientation
+        recon_img, _ = reconstruct_from_orientation(sim_images, phases, angle,
+                                                    band_shift_norm, N, noise_var=1e-3)
+        per_angle_recons.append(recon_img)
+        recon_sum += recon_img
+
+    # Average across orientations for isotropy
+    recon_iso = recon_sum / len(angles)
+
+    # ---------- Display Reconstructions ----------
+    fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+
+    axs[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
+    axs[0,0].set_title("Ground Truth"); axs[0,0].axis("off")
+
+    axs[0,1].imshow(lp, cmap='gray', vmin=0, vmax=1)
+    axs[0,1].set_title("Low-pass (Widefield)"); axs[0,1].axis("off")
+
+    axs[1,0].imshow(recon_iso, cmap='gray', vmin=0, vmax=1)
+    axs[1,0].set_title("Isotropic SIM Reconstruction"); axs[1,0].axis("off")
+
+    axs[1,1].imshow(np.concatenate(per_angle_recons, axis=1), cmap='gray', vmin=0, vmax=1)
+    axs[1,1].set_title("Per-Orientation Reconstructions"); axs[1,1].axis("off")
+
     plt.tight_layout()
-
-    low, high = separate_components(sim_images[0])
-    plt.figure(figsize=(10,4))
-    plt.subplot(1,2,1); plt.imshow(low, cmap='gray'); plt.title("Low-frequency part")
-    plt.subplot(1,2,2); plt.imshow(high, cmap='gray'); plt.title("High-frequency part")
-
-
     plt.show()
-
-    
-
