@@ -238,13 +238,20 @@ def reconstruct_from_orientation(sim_imgs_phases, phases, angle_deg, band_shift_
 
 
 # ---------- Noise models ----------
-def add_gaussian_noise(img, sigma=0.5):
+def add_gaussian_noise(img, sigma=0.05):
     noisy = img + np.random.normal(0, sigma, img.shape)
     return np.clip(noisy, 0, 1)
 
 def add_poisson_noise(img, scale=50):
     vals = np.random.poisson(img * scale) / float(scale)
     return np.clip(vals, 0, 1)
+
+def show_with_scalebar(ax, img, title="", cmap="gray", vmin=0, vmax=1):
+    ax.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax)
+    add_scale_bar(ax, img.shape)
+    ax.set_title(title)
+    ax.axis("off")
+
 # if __name__ == "__main__":
 #     N = 512
 #     gt = generate_ground_truth(N)
@@ -311,7 +318,7 @@ if __name__ == "__main__":
     N = 512
     gt = generate_ground_truth(N)
     lp = low_pass_filter(gt, cutoff=0.15)
-
+    
     freq = 12
     phases = [0, 2*np.pi/3, 4*np.pi/3]
     angles = [0, 60, 120]   # multiple orientations
@@ -329,19 +336,19 @@ if __name__ == "__main__":
         fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 5))
         fig.suptitle(f"Orientation {angle}°", fontsize=14)
 
-        axes[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
-        axes[0,0].set_title("Ground Truth"); axes[0,0].axis('off')
-
-        axes[1,0].imshow(lp, cmap='gray', vmin=0, vmax=1)
-        axes[1,0].set_title("Low-pass (widefield)"); axes[1,0].axis('off')
-
+        # axes[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
+        # axes[0,0].set_title("Ground Truth"); axes[0,0].axis('off')
+        show_with_scalebar(axes[0,0], gt, f"Ground Truth")
+        # axes[1,0].imshow(lp, cmap='gray', vmin=0, vmax=1)
+        # axes[1,0].set_title("Low-pass (widefield)"); axes[1,0].axis('off')
+        show_with_scalebar(axes[1,0], lp, f"Low-pass (widefield)")
         for i in range(len(phases)):
-            axes[0,i+1].imshow(patterns[i], cmap='gray', vmin=0, vmax=1)
-            axes[0,i+1].set_title(f"Pattern phase {i}"); axes[0,i+1].axis('off')
-
-            axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
-            axes[1,i+1].set_title(f"SIM raw phase {i}"); axes[1,i+1].axis('off')
-
+            # axes[0,i+1].imshow(patterns[i], cmap='gray', vmin=0, vmax=1)
+            # axes[0,i+1].set_title(f"Pattern phase {i}"); axes[0,i+1].axis('off')
+            show_with_scalebar(axes[0,i+1], patterns[i], f"Pattern phase {i}")
+            # axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
+            # axes[1,i+1].set_title(f"SIM raw phase {i}"); axes[1,i+1].axis('off')
+            show_with_scalebar(axes[1,i+1], sim_images[i], f"Pattern phase {i}")
         plt.tight_layout()
 
         # ---------- Fourier Transforms ----------
@@ -353,10 +360,11 @@ if __name__ == "__main__":
 
         for i in range(len(phases)):
             show_fft(sim_images[i], axes[0,i+1], f"SIM raw {i} FFT")
-            axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
-            axes[1,i+1].set_title(f"SIM raw {i} (image)")
-            axes[1,i+1].axis('off')
-
+            # axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
+            
+            # axes[1,i+1].set_title(f"SIM raw {i} (image)")
+            # axes[1,i+1].axis('off')
+            show_with_scalebar(axes[1,i+1], sim_images[i], f"SIM raw {i} (image)")
         plt.tight_layout()
 
         # ---------- Low & High frequency split for one phase ----------
@@ -364,7 +372,9 @@ if __name__ == "__main__":
         plt.figure(figsize=(10,4))
         plt.suptitle(f"Frequency components (orientation {angle}°)", fontsize=14)
         plt.subplot(1,2,1); plt.imshow(low, cmap='gray'); plt.title("Low-frequency part")
+        
         plt.subplot(1,2,2); plt.imshow(high, cmap='gray'); plt.title("High-frequency part")
+        
     # ---------- Reconstruction across orientations ----------
     band_shift_norm = 0.12   # matches your separation setting
     recon_sum = np.zeros_like(lp)
@@ -388,17 +398,27 @@ if __name__ == "__main__":
     # ---------- Display Reconstructions ----------
     fig, axs = plt.subplots(2, 2, figsize=(10, 10))
 
-    axs[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
-    axs[0,0].set_title("Ground Truth"); axs[0,0].axis("off")
+    # axs[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
+    # add_scale_bar(axs[0,0], gt.shape)
+    # axs[0,0].set_title("Ground Truth"); axs[0,0].axis("off")
 
-    axs[0,1].imshow(lp, cmap='gray', vmin=0, vmax=1)
-    axs[0,1].set_title("Low-pass (Widefield)"); axs[0,1].axis("off")
+    # axs[0,1].imshow(lp, cmap='gray', vmin=0, vmax=1)
+    # add_scale_bar(axs[0,0], gt.shape)
+    # axs[0,1].set_title("Low-pass (Widefield)"); axs[0,1].axis("off")
 
-    axs[1,0].imshow(recon_iso, cmap='gray', vmin=0, vmax=1)
-    axs[1,0].set_title("Isotropic SIM Reconstruction"); axs[1,0].axis("off")
+    # axs[1,0].imshow(recon_iso, cmap='gray', vmin=0, vmax=1)
+    # add_scale_bar(axs[0,0], gt.shape)
+    # axs[1,0].set_title("Isotropic SIM Reconstruction"); axs[1,0].axis("off")
 
-    axs[1,1].imshow(np.concatenate(per_angle_recons, axis=1), cmap='gray', vmin=0, vmax=1)
-    axs[1,1].set_title("Per-Orientation Reconstructions"); axs[1,1].axis("off")
+    # axs[1,1].imshow(np.concatenate(per_angle_recons, axis=1), cmap='gray', vmin=0, vmax=1)
+    # add_scale_bar(axs[0,0], gt.shape)
+    # axs[1,1].set_title("Per-Orientation Reconstructions"); axs[1,1].axis("off")
+    show_with_scalebar(axs[0,0], gt, "Ground Truth")
+    show_with_scalebar(axs[0,1], lp, "Low-pass (Widefield)")
+    show_with_scalebar(axs[1,0], recon_iso,"Isotropic SIM Reconstruction")
+    show_with_scalebar(axs[1,1], np.concatenate(per_angle_recons, axis=1), "Per-Orientation Reconstructions")
+
+
 
     plt.tight_layout()
 
@@ -457,17 +477,55 @@ if __name__ == "__main__":
     fig, axs = plt.subplots(2, 2, figsize=(10, 10))
     fig.suptitle("SIM Reconstruction with Noise", fontsize=14)
 
-    axs[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
-    axs[0,0].set_title("Ground Truth"); axs[0,0].axis("off")
+    # axs[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
+    # add_scale_bar(axs[0,0], gt.shape)
+    # axs[0,0].set_title("Ground Truth"); axs[0,0].axis("off")
 
-    axs[0,1].imshow(lp, cmap='gray', vmin=0, vmax=1)
-    axs[0,1].set_title("Low-pass (Widefield)"); axs[0,1].axis("off")
+    # axs[0,1].imshow(lp, cmap='gray', vmin=0, vmax=1)
+    # add_scale_bar(axs[0,0], gt.shape)
+    # axs[0,1].set_title("Low-pass (Widefield)"); axs[0,1].axis("off")
 
-    axs[1,0].imshow(recon_iso_noisy, cmap='gray', vmin=0, vmax=1)
-    axs[1,0].set_title("Isotropic SIM Reconstruction (Noisy)"); axs[1,0].axis("off")
+    # axs[1,0].imshow(recon_iso_noisy, cmap='gray', vmin=0, vmax=1)
+    # add_scale_bar(axs[0,0], gt.shape)
+    # axs[1,0].set_title("Isotropic SIM Reconstruction (Noisy)"); axs[1,0].axis("off")
 
-    axs[1,1].imshow(np.concatenate(per_angle_recons_noisy, axis=1), cmap='gray', vmin=0, vmax=1)
-    axs[1,1].set_title("Per-Orientation Reconstructions (Noisy)"); axs[1,1].axis("off")
-
+    # axs[1,1].imshow(np.concatenate(per_angle_recons_noisy, axis=1), cmap='gray', vmin=0, vmax=1)
+    # add_scale_bar(axs[0,0], gt.shape)
+    # axs[1,1].set_title("Per-Orientation Reconstructions (Noisy)"); axs[1,1].axis("off")
+    show_with_scalebar(axs[0,0], gt, "Ground Truth")
+    show_with_scalebar(axs[0,1], lp, "Low-pass (Widefield)")
+    show_with_scalebar(axs[1,0], recon_iso_noisy, "Isotropic SIM Reconstruction (Noisy)")
+    show_with_scalebar(axs[1,1], np.concatenate(per_angle_recons_noisy, axis=1), "Per-Orientation Reconstructions")
     plt.tight_layout()
+
+    # ---------- NOISY Fourier Transforms ----------
+    for angle in angles:
+        sim_images_noisy = []
+        patterns = []
+        for p in phases:
+            pat = illumination_pattern(N, freq_cycles=freq, angle_deg=angle, phase=p)
+            patterns.append(pat)
+            sim_raw = lp * pat
+            # --- Add noise here ---
+            sim_raw = add_gaussian_noise(sim_raw, sigma=0.4)
+            # sim_raw = add_poisson_noise(sim_raw, scale=255)
+            sim_images_noisy.append(sim_raw)
+
+        # Display noisy Fourier transforms
+        fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 6))
+        fig.suptitle(f"Fourier domain with Noise (orientation {angle}°)", fontsize=14)
+
+        show_fft(gt, axes[0,0], "GT Fourier")
+        show_fft(lp, axes[1,0], "Low-pass Fourier")
+        show_with_scalebar(axes[1,i+1], sim_images_noisy[i], f"Noisy SIM raw {i} (image)")
+
+        for i in range(len(phases)):
+            show_fft(sim_images_noisy[i], axes[0,i+1], f"Noisy SIM raw {i} FFT")
+            #axes[1,i+1].imshow(sim_images_noisy[i], cmap='gray', vmin=0, vmax=1)
+            # add_scale_bar(axs[0,0], gt.shape)
+            # axes[1,i+1].set_title(f"Noisy SIM raw {i} (image)")
+            # axes[1,i+1].axis('off')
+            show_with_scalebar(axes[1,i+1], sim_images_noisy[i], f"Noisy SIM raw {i} (image)")
+
+        plt.tight_layout()
     plt.show()
