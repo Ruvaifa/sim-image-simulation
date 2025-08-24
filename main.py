@@ -296,7 +296,7 @@ if __name__ == "__main__":
             pat = illumination_pattern(N, freq_cycles=freq, angle_deg=angle, phase=p)
             sim_raw = lp * pat
             # --- Add noise here ---
-            sim_raw = add_gaussian_noise(sim_raw, sigma=0.05)
+            sim_raw = add_gaussian_noise(sim_raw, sigma=0.4)
             #sim_raw = add_poisson_noise(sim_raw, scale=255)
             sim_images_noisy.append(sim_raw)
 
