@@ -41,7 +41,7 @@ Show both clean and noisy reconstructions with scale bars.
 ![Fourier Tranformation](assets/ft.png)
 
 ###  Fourier Tranformation with Noise
-![ Fourier Tranformation with Noise (5%)](assets/lp.png)
+![ Fourier Tranformation with Noise (5%)](assets/ft_noise.png)
 
 ### Phase pattern
 ![Phase patterns](assets/phase_pattern.png)
