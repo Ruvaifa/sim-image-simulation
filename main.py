@@ -91,7 +91,6 @@ def separate_components(img, cutoff=0.08, band_radius=0.015, band_shift=0.12):
     low_mask = R < cutoff
 
     # --- High-frequency mask (sidebands) ---
-    # Example: assume grating along x → sidebands shifted along U axis
     high_mask = ((np.sqrt((U- band_shift)**2 + V**2) < band_radius) |
                  (np.sqrt((U+ band_shift)**2 + V**2) < band_radius))
 
@@ -140,49 +139,6 @@ def shift_spectrum(F, shift_pix):
     sy, sx = int(round(shift_pix[0])), int(round(shift_pix[1]))
     return np.roll(np.roll(F, sy, axis=0), sx, axis=1)
 
-
-# def reconstruct_from_orientation(sim_imgs_phases, phases, angle_deg, band_shift_norm, N, w0=1.0, eps=1e-9):
-#     """
-#     Reconstruct image from three-phase SIM images of one grating orientation.
-#     sim_imgs_phases: list/array of 3 real-space images (N,N) for the 3 phases
-#     phases: list of 3 phases in radians
-#     angle_deg: orientation of grating (degrees)
-#     band_shift_norm: sideband shift in normalized freq units (like your band_shift param, 0..0.5)
-#     Returns:
-#       recon_image (real), and also the combined Fourier spectrum (fftshifted) for inspection.
-#     """
-#     # compute FFTs (fftshifted)
-#     F_imgs = np.stack([np.fft.fftshift(np.fft.fft2(im)) for im in sim_imgs_phases], axis=0)  # (3,N,N)
-
-#     # demodulate -> obtain F0(u), F+1(u), F-1(u) (still centered)
-#     F0, Fp, Fm = demodulate_three_phase_F(F_imgs, phases)  # complex arrays
-
-#     # compute pixel shifts to move sidebands to center
-#     # band_shift_norm is fraction of Nyquist (u coords in [-0.5,0.5) so multiply by N)
-#     theta = np.deg2rad(angle_deg)
-#     # pixel offset in frequency plane (cols = x, rows = y)
-#     # U axis (x / cols) corresponds to horizontal freq index, V axis (y / rows) to vertical
-#     kx = band_shift_norm * np.cos(theta) * N   # pixels in x direction
-#     ky = band_shift_norm * np.sin(theta) * N   # pixels in y direction
-
-#     # To shift the +1 sideband to center we need to roll by (-ky, -kx)
-#     shift_plus = (-ky, -kx)
-#     shift_minus = ( ky,  kx)  # -1 sideband will be shifted by opposite amount
-
-#     Fp_shifted = shift_spectrum(Fp, shift_plus)
-#     Fm_shifted = shift_spectrum(Fm, shift_minus)
-
-#     # Combine spectra: simple sum, with small Wiener-like stabilization on denominator if needed
-#     # Optionally apply a weighting to avoid noise amplification; here we use equal weights.
-#     F_combined = F0 + w0 * Fp_shifted + w0 * Fm_shifted
-
-#     # Inverse transform to get reconstructed image
-#     recon = np.fft.ifft2(np.fft.ifftshift(F_combined))
-#     recon_real = np.real(recon)
-#     # normalize for display
-#     recon_real -= recon_real.min()
-#     recon_real /= (recon_real.max() + 1e-12)
-#     return recon_real, F_combined
 def shift_spectrum_subpixel(F, shift_pix):
     """
     Subpixel shift of a 2D fftshifted spectrum using phase ramps.
@@ -213,8 +169,6 @@ def reconstruct_from_orientation(sim_imgs_phases, phases, angle_deg, band_shift_
     kx = band_shift_norm * np.cos(theta) * N
     ky = band_shift_norm * np.sin(theta) * N
 
-    # Fp_shifted = shift_spectrum(Fp, (-ky, -kx))
-    # Fm_shifted = shift_spectrum(Fm, ( ky,  kx))
     Fp_shifted = shift_spectrum_subpixel(Fp, (-ky, -kx))
     Fm_shifted = shift_spectrum_subpixel(Fm, ( ky,  kx))
     # --- Wiener-like weighting ---
@@ -252,68 +206,6 @@ def show_with_scalebar(ax, img, title="", cmap="gray", vmin=0, vmax=1):
     ax.set_title(title)
     ax.axis("off")
 
-# if __name__ == "__main__":
-#     N = 512
-#     gt = generate_ground_truth(N)
-#     # low-pass the GT once (the "widefield" baseline)
-#     lp = low_pass_filter(gt, cutoff=0.15)
-
-#     # choose grating parameters
-#     freq = 12            # cycles across the whole image (adjust by eye)
-#     angle = 0.0          # degrees (0 = stripes along x)
-#     phases = [0, 2*np.pi/3, 4*np.pi/3]   # three-phase SIM
-
-#     sim_images = []
-#     patterns = []
-#     for p in phases:
-#         pat = illumination_pattern(N, freq_cycles=freq, angle_deg=angle, phase=p)
-#         patterns.append(pat)
-#         sim_raw = lp * pat           # multiply low-passed GT with grating
-#         sim_images.append(sim_raw)
-
-#     # display
-#     fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 5))
-
-#     axes[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
-#     axes[0,0].set_title("Ground Truth")
-#     axes[0,0].axis('off')
-
-#     axes[1,0].imshow(lp, cmap='gray', vmin=0, vmax=1)
-#     axes[1,0].set_title("Low-pass (widefield)")
-#     axes[1,0].axis('off')
-
-#     for i in range(len(phases)):
-#         axes[0,i+1].imshow(patterns[i], cmap='gray', vmin=0, vmax=1)
-#         axes[0,i+1].set_title(f"Pattern (phase {i})")
-#         axes[0,i+1].axis('off')
-
-#         axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
-#         axes[1,i+1].set_title(f"SIM raw (phase {i})")
-#         axes[1,i+1].axis('off')
-
-
-#     # ---------- Fourier Transforms ----------
-#     fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 6))
-    
-#     # GT and low-pass
-#     show_fft(gt, axes[0,0], "GT Fourier")
-#     show_fft(lp, axes[1,0], "Low-pass Fourier")
-    
-#     # Each SIM image
-#     for i in range(len(phases)):
-#         show_fft(sim_images[i], axes[0,i+1], f"SIM raw {i} FFT")
-#         axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
-#         axes[1,i+1].set_title(f"SIM raw {i} (image)")
-#         axes[1,i+1].axis('off')
-#     plt.tight_layout()
-
-#     low, high = separate_components(sim_images[0])
-#     plt.figure(figsize=(10,4))
-#     plt.subplot(1,2,1); plt.imshow(low, cmap='gray'); plt.title("Low-frequency part")
-#     plt.subplot(1,2,2); plt.imshow(high, cmap='gray'); plt.title("High-frequency part")
-
-
-#     plt.show()
 if __name__ == "__main__":
     N = 512
     gt = generate_ground_truth(N)
@@ -336,18 +228,11 @@ if __name__ == "__main__":
         fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 5))
         fig.suptitle(f"Orientation {angle}°", fontsize=14)
 
-        # axes[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
-        # axes[0,0].set_title("Ground Truth"); axes[0,0].axis('off')
         show_with_scalebar(axes[0,0], gt, f"Ground Truth")
-        # axes[1,0].imshow(lp, cmap='gray', vmin=0, vmax=1)
-        # axes[1,0].set_title("Low-pass (widefield)"); axes[1,0].axis('off')
         show_with_scalebar(axes[1,0], lp, f"Low-pass (widefield)")
         for i in range(len(phases)):
-            # axes[0,i+1].imshow(patterns[i], cmap='gray', vmin=0, vmax=1)
-            # axes[0,i+1].set_title(f"Pattern phase {i}"); axes[0,i+1].axis('off')
+
             show_with_scalebar(axes[0,i+1], patterns[i], f"Pattern phase {i}")
-            # axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
-            # axes[1,i+1].set_title(f"SIM raw phase {i}"); axes[1,i+1].axis('off')
             show_with_scalebar(axes[1,i+1], sim_images[i], f"Pattern phase {i}")
         plt.tight_layout()
 
@@ -360,10 +245,6 @@ if __name__ == "__main__":
 
         for i in range(len(phases)):
             show_fft(sim_images[i], axes[0,i+1], f"SIM raw {i} FFT")
-            # axes[1,i+1].imshow(sim_images[i], cmap='gray', vmin=0, vmax=1)
-            
-            # axes[1,i+1].set_title(f"SIM raw {i} (image)")
-            # axes[1,i+1].axis('off')
             show_with_scalebar(axes[1,i+1], sim_images[i], f"SIM raw {i} (image)")
         plt.tight_layout()
 
@@ -398,57 +279,12 @@ if __name__ == "__main__":
     # ---------- Display Reconstructions ----------
     fig, axs = plt.subplots(2, 2, figsize=(10, 10))
 
-    # axs[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
-    # add_scale_bar(axs[0,0], gt.shape)
-    # axs[0,0].set_title("Ground Truth"); axs[0,0].axis("off")
-
-    # axs[0,1].imshow(lp, cmap='gray', vmin=0, vmax=1)
-    # add_scale_bar(axs[0,0], gt.shape)
-    # axs[0,1].set_title("Low-pass (Widefield)"); axs[0,1].axis("off")
-
-    # axs[1,0].imshow(recon_iso, cmap='gray', vmin=0, vmax=1)
-    # add_scale_bar(axs[0,0], gt.shape)
-    # axs[1,0].set_title("Isotropic SIM Reconstruction"); axs[1,0].axis("off")
-
-    # axs[1,1].imshow(np.concatenate(per_angle_recons, axis=1), cmap='gray', vmin=0, vmax=1)
-    # add_scale_bar(axs[0,0], gt.shape)
-    # axs[1,1].set_title("Per-Orientation Reconstructions"); axs[1,1].axis("off")
     show_with_scalebar(axs[0,0], gt, "Ground Truth")
     show_with_scalebar(axs[0,1], lp, "Low-pass (Widefield)")
     show_with_scalebar(axs[1,0], recon_iso,"Isotropic SIM Reconstruction")
     show_with_scalebar(axs[1,1], np.concatenate(per_angle_recons, axis=1), "Per-Orientation Reconstructions")
-
-
-
     plt.tight_layout()
 
-    # ---------- NOISY Fourier Transforms ----------
-    # for angle in angles:
-    #     sim_images_noisy = []
-    #     patterns = []
-    #     for p in phases:
-    #         pat = illumination_pattern(N, freq_cycles=freq, angle_deg=angle, phase=p)
-    #         patterns.append(pat)
-    #         sim_raw = lp * pat
-    #         # --- Add noise here ---
-    #         sim_raw = add_gaussian_noise(sim_raw, sigma=0.05)
-    #         # sim_raw = add_poisson_noise(sim_raw, scale=255)
-    #         sim_images_noisy.append(sim_raw)
-
-    #     # Display noisy Fourier transforms
-    #     fig, axes = plt.subplots(2, len(phases)+1, figsize=(12, 6))
-    #     fig.suptitle(f"Fourier domain with Noise (orientation {angle}°)", fontsize=14)
-
-    #     show_fft(gt, axes[0,0], "GT Fourier")
-    #     show_fft(lp, axes[1,0], "Low-pass Fourier")
-
-    #     for i in range(len(phases)):
-    #         show_fft(sim_images_noisy[i], axes[0,i+1], f"Noisy SIM raw {i} FFT")
-    #         axes[1,i+1].imshow(sim_images_noisy[i], cmap='gray', vmin=0, vmax=1)
-    #         axes[1,i+1].set_title(f"Noisy SIM raw {i} (image)")
-    #         axes[1,i+1].axis('off')
-
-    #     plt.tight_layout()
     # ---------- NOISY Reconstruction ----------
     band_shift_norm = 0.12   # same as before
     recon_sum_noisy = np.zeros_like(lp)
@@ -460,7 +296,7 @@ if __name__ == "__main__":
             pat = illumination_pattern(N, freq_cycles=freq, angle_deg=angle, phase=p)
             sim_raw = lp * pat
             # --- Add noise here ---
-            sim_raw = add_gaussian_noise(sim_raw, sigma=0.4)
+            sim_raw = add_gaussian_noise(sim_raw, sigma=0.05)
             #sim_raw = add_poisson_noise(sim_raw, scale=255)
             sim_images_noisy.append(sim_raw)
 
@@ -477,21 +313,6 @@ if __name__ == "__main__":
     fig, axs = plt.subplots(2, 2, figsize=(10, 10))
     fig.suptitle("SIM Reconstruction with Noise", fontsize=14)
 
-    # axs[0,0].imshow(gt, cmap='gray', vmin=0, vmax=1)
-    # add_scale_bar(axs[0,0], gt.shape)
-    # axs[0,0].set_title("Ground Truth"); axs[0,0].axis("off")
-
-    # axs[0,1].imshow(lp, cmap='gray', vmin=0, vmax=1)
-    # add_scale_bar(axs[0,0], gt.shape)
-    # axs[0,1].set_title("Low-pass (Widefield)"); axs[0,1].axis("off")
-
-    # axs[1,0].imshow(recon_iso_noisy, cmap='gray', vmin=0, vmax=1)
-    # add_scale_bar(axs[0,0], gt.shape)
-    # axs[1,0].set_title("Isotropic SIM Reconstruction (Noisy)"); axs[1,0].axis("off")
-
-    # axs[1,1].imshow(np.concatenate(per_angle_recons_noisy, axis=1), cmap='gray', vmin=0, vmax=1)
-    # add_scale_bar(axs[0,0], gt.shape)
-    # axs[1,1].set_title("Per-Orientation Reconstructions (Noisy)"); axs[1,1].axis("off")
     show_with_scalebar(axs[0,0], gt, "Ground Truth")
     show_with_scalebar(axs[0,1], lp, "Low-pass (Widefield)")
     show_with_scalebar(axs[1,0], recon_iso_noisy, "Isotropic SIM Reconstruction (Noisy)")
@@ -507,7 +328,7 @@ if __name__ == "__main__":
             patterns.append(pat)
             sim_raw = lp * pat
             # --- Add noise here ---
-            sim_raw = add_gaussian_noise(sim_raw, sigma=0.4)
+            sim_raw = add_gaussian_noise(sim_raw, sigma=0.05)
             # sim_raw = add_poisson_noise(sim_raw, scale=255)
             sim_images_noisy.append(sim_raw)
 
@@ -521,10 +342,6 @@ if __name__ == "__main__":
 
         for i in range(len(phases)):
             show_fft(sim_images_noisy[i], axes[0,i+1], f"Noisy SIM raw {i} FFT")
-            #axes[1,i+1].imshow(sim_images_noisy[i], cmap='gray', vmin=0, vmax=1)
-            # add_scale_bar(axs[0,0], gt.shape)
-            # axes[1,i+1].set_title(f"Noisy SIM raw {i} (image)")
-            # axes[1,i+1].axis('off')
             show_with_scalebar(axes[1,i+1], sim_images_noisy[i], f"Noisy SIM raw {i} (image)")
 
         plt.tight_layout()
