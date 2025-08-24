@@ -40,7 +40,7 @@ Show both clean and noisy reconstructions with scale bars.
 ### Fourier Tranformation without Noise
 ![Fourier Tranformation](assets/ft.png)
 
-###  Fourier Tranformation with Noise
+###  Fourier Tranformation with Noise(5%)
 ![ Fourier Tranformation with Noise (5%)](assets/ft_noise.png)
 
 ### Phase pattern
@@ -52,7 +52,7 @@ Show both clean and noisy reconstructions with scale bars.
 ### SIM Reconstructed without Noise
 ![SIM Reconstructed without Noise](assets/sim_recon.png)
 
-### SIM Reconstructed with Noise 
+### SIM Reconstructed with Noise (40%)
 ![SIM Reconstructed with Noise (40%)](assets/sim_recon_noise.png)
 
 ---
